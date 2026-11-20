@@ -1,302 +1,145 @@
-# Android Music Server — Navidrome on a Samsung Galaxy A12
+# Personal Music Server on Android
 
-A self-hosted music streaming server built using an old Android smartphone, Debian ARM64, Navidrome, and Tailscale.
+A personal music streaming server built using an old Samsung Galaxy A12, running Navidrome inside a Debian environment through Termux and PRoot-Distro.
 
-The project turns a spare Samsung Galaxy A12 into a personal music server that streams a locally stored music collection to another Android device, both on the home network and remotely over the internet.
+The server streams a local music library to another Android phone over the home network or remotely through Tailscale. It uses an existing microSD music collection without reorganizing or copying the files.
 
-The system runs without root access, bootloader modifications, or router port forwarding.
+## Project overview
 
-## Project status
+The goal of this project is to repurpose an old Android phone into a low-power personal music server.
 
-**Operational prototype — local and remote streaming, automatic startup, and periodic monitoring successfully tested.**
+### Hardware and software
 
-| Component | Configuration |
+| Component | Details |
 |---|---|
-| Server hardware | Samsung Galaxy A12 Nacho (SM-A127F/DSN) |
+| Server device | Samsung Galaxy A12 Nacho (SM-A127F/DSN) |
 | Operating system | Android 13 |
-| Server environment | Termux |
-| Linux distribution | Debian 13 (Trixie) |
-| Architecture | ARM64 / AArch64 |
-| Media server | Navidrome 0.64.2 |
-| Media storage | 32 GB microSD card |
+| Linux environment | Debian 13 (Trixie), ARM64 |
+| Android terminal | Termux |
+| Linux environment manager | PRoot-Distro |
+| Music server | Navidrome 0.64.2 |
 | Audio processing | FFmpeg 7.1.5 |
-| Remote connectivity | Tailscale |
-| Android client | Subtracks |
-| Streaming port | 4533 |
-| Process startup | Termux:Boot |
-| Monitoring | Termux:API and Android JobScheduler |
-| Log management | logrotate |
+| Music storage | 32 GB microSD card |
+| Remote access | Tailscale |
+| Client application | Subtracks (Android) |
+| Server port | 4533 |
 
-Implemented features:
-
-- Local and remote music streaming.
-- Direct access to the existing music library on the microSD card.
-- Automatic Navidrome startup after Android reboots.
-- Automatic Tailscale reconnection.
-- Periodic server health checks.
-- Internal storage and microSD storage monitoring.
-- Automatic log rotation.
-
-The system has been reboot-tested without manually launching the server.
-
----
-
-## 1. Architecture
-
-### System overview
+## Architecture
 
 ```mermaid
-flowchart TB
-    subgraph Server["Samsung Galaxy A12 — Android 13"]
-        T["Termux"]
-        B["Termux:Boot"]
-        D["Debian 13 ARM64<br/>PRoot-Distro"]
-        N["Navidrome<br/>Port 4533"]
-        M["Monitoring script"]
-        L["logrotate"]
-        SD[("microSD card<br/>Music library")]
-
-        B --> T
-        T --> D
-        D --> N
-        SD -->|"Bind mount"| D
-        M --> N
-        M --> L
-    end
-
-    subgraph Network["Private connectivity"]
-        TS["Tailscale<br/>Encrypted private network"]
-    end
-
-    subgraph Client["New Android phone"]
-        A["Subtracks<br/>Subsonic-compatible client"]
-    end
-
-    N <-->|"Local Wi-Fi or<br/>Tailscale connection"| A
-    TS --- N
-    TS --- A
+flowchart TD
+    A["microSD card<br/>Music library"] --> B["Android 13<br/>Samsung Galaxy A12"]
+    B --> C["Termux"]
+    C --> D["PRoot-Distro"]
+    D --> E["Debian 13"]
+    E --> F["Navidrome"]
+    F --> G["HTTP port 4533"]
+    G --> H["Tailscale VPN"]
+    H --> I["Android client<br/>Subtracks"]
 ```
 
-### How it works
+The Android phone hosts the server. Termux provides a terminal environment, while PRoot-Distro runs Debian as a Linux userspace environment.
 
-1. Android runs Termux, providing a Linux-like command-line environment.
-2. PRoot-Distro runs Debian 13 ARM64 without replacing Android or requiring root.
-3. Navidrome runs inside Debian and indexes the music collection.
-4. The microSD card is exposed to Debian through a bind mount. Music files remain on the original storage.
-5. Tailscale connects the server and client devices through a private encrypted network.
-6. The client accesses Navidrome through its HTTP interface on port `4533`.
-7. Termux:Boot starts the server automatically after Android boots.
-8. Android JobScheduler periodically executes a monitoring script.
-9. logrotate manages application and monitoring logs.
+Debian is not a virtual machine: it shares the Android Linux kernel while providing its own userspace, package manager, libraries, and filesystem layout.
 
-### Why these technologies?
+The microSD card is made accessible inside Debian through a PRoot bind mount.
 
-- **Termux:** provides the terminal environment and Linux packages on Android.
-- **PRoot-Distro:** provides a Debian userspace without installing a separate operating system.
-- **Debian:** provides package management and a familiar Linux environment.
-- **Navidrome:** lightweight, self-hosted music server with Subsonic-compatible APIs.
-- **FFmpeg:** supports audio processing and media format handling.
-- **Tailscale:** enables secure remote connectivity without public port forwarding.
-- **Termux:Boot:** starts server processes automatically after device boot.
-- **Termux:API:** exposes Android functionality to Termux applications.
-- **logrotate:** manages log file sizes and archived logs.
+## Installation and configuration
 
----
+The following instructions describe the main setup. Paths and device-specific values may need to be adapted.
 
-## 2. Installation guide
+### 1. Install Termux
 
-### Requirements
+Install Termux from a trusted distribution source, such as F-Droid.
 
-- Android smartphone with a working battery.
-- Termux installed from F-Droid or its official distribution source.
-- Internet connection.
-- microSD card or accessible storage containing music files.
-- A second Android device for testing.
-- No root access required.
+Termux and its add-ons should come from compatible distribution sources.
 
-### Step 1 — Install Termux
+### 2. Install PRoot-Distro and Debian
 
-Install Termux from:
-
-https://f-droid.org/packages/com.termux/
-
-Open Termux and update its packages:
+Inside Termux:
 
 ```bash
-pkg update && pkg upgrade -y
-```
-
-Grant storage access:
-
-```bash
-termux-setup-storage
-```
-
-Accept the Android storage permission request.
-
-### Step 2 — Install PRoot-Distro
-
-```bash
+pkg update && pkg upgrade
 pkg install proot-distro
+proot-distro install debian
 ```
 
-Install Debian 13:
-
-```bash
-proot-distro install debian:13
-```
-
-Enter Debian:
+Log into Debian:
 
 ```bash
 proot-distro login debian
 ```
 
-Verify the installation:
+Update Debian:
 
 ```bash
-cat /etc/os-release
-uname -m
+apt update && apt upgrade
 ```
 
-Expected architecture:
-
-```text
-aarch64
-```
-
-### Step 3 — Install dependencies
+### 3. Install FFmpeg
 
 Inside Debian:
 
 ```bash
-apt update
-apt full-upgrade -y
-apt install -y curl wget ca-certificates ffmpeg
+apt install ffmpeg
 ```
 
-Verify FFmpeg:
+### 4. Install Navidrome
 
-```bash
-ffmpeg -version
-```
+Download the ARM64 Linux release of Navidrome from its official release page.
 
-### Step 4 — Expose the microSD card to Debian
-
-First, identify the actual microSD mount path in Termux. Android storage paths vary by device.
-
-In this installation, the card was mounted at:
+Place the executable at:
 
 ```text
-/storage/0403-0201
-```
-
-The music collection was located at:
-
-```text
-/storage/0403-0201/Music
-```
-
-Create a mount destination inside Debian:
-
-```bash
-proot-distro login debian -- bash -c "mkdir -p /media/microsd"
-```
-
-Exit any existing Debian session and return to Termux.
-
-Enter Debian with the microSD bind mount:
-
-```bash
-proot-distro login debian --bind /storage/0403-0201:/media/microsd
-```
-
-If your microSD card has a different mount path, replace `/storage/0403-0201` with your actual path.
-
-Verify access:
-
-```bash
-ls -la /media/microsd/Music
-```
-
-Check that MP3 files are readable:
-
-```bash
-find /media/microsd/Music -type f -iname "*.mp3" | head -10
-```
-
-**Important:** The bind mount must be supplied whenever Debian is launched for the server. Without it, Navidrome will not see the music directory.
-
-### Step 5 — Download Navidrome
-
-This installation uses Navidrome 0.64.2 for Linux ARM64.
-
-Official releases:
-
-https://github.com/navidrome/navidrome/releases
-
-Download the Debian package:
-
-```bash
-mkdir -p /tmp/navidrome-download
-cd /tmp/navidrome-download
-
-wget -O navidrome.deb \
-https://github.com/navidrome/navidrome/releases/download/v0.64.2/navidrome_0.64.2_linux_arm64.deb
-```
-
-Verify its SHA-256 checksum:
-
-```bash
-sha256sum navidrome.deb
-```
-
-Expected checksum:
-
-```text
-42d635a28d04c2753a68d503b937cfee1bb6c660ea50a14dd92140331ce2e100
-```
-
-Extract the package:
-
-```bash
-dpkg-deb -x navidrome.deb extracted
-```
-
-Check the executable:
-
-```bash
-extracted/usr/bin/navidrome --version
-```
-
-### Step 6 — Install Navidrome
-
-Install the executable:
-
-```bash
-install -Dm755 \
-/tmp/navidrome-download/extracted/usr/bin/navidrome \
 /usr/local/bin/navidrome
 ```
 
-Create configuration and application data directories:
+Make it executable:
+
+```bash
+chmod +x /usr/local/bin/navidrome
+```
+
+Check the installed version:
+
+```bash
+navidrome --version
+```
+
+### 5. Make the microSD music library accessible
+
+Find the microSD card's actual Android storage path. It commonly resembles:
+
+```text
+/storage/YOUR-SDCARD-ID
+```
+
+The identifier is device-specific. Replace `YOUR-SDCARD-ID` with the actual directory name.
+
+Log into Debian with the card bound into the Linux environment:
+
+```bash
+proot-distro login debian --bind /storage/YOUR-SDCARD-ID:/media/microsd
+```
+
+The music library should then be accessible inside Debian at:
+
+```text
+/media/microsd/Music
+```
+
+The original music files remain on the microSD card.
+
+### 6. Configure Navidrome
+
+Create the configuration directory and file:
 
 ```bash
 mkdir -p /etc/navidrome
-mkdir -p /var/lib/navidrome
-```
-
-The Debian package is extracted rather than installed as a system service. This avoids depending on systemd, which is generally unavailable in this PRoot setup.
-
-### Step 7 — Configure Navidrome
-
-Create the configuration file:
-
-```bash
 nano /etc/navidrome/navidrome.toml
 ```
 
-Configuration:
+Example configuration:
 
 ```toml
 MusicFolder = "/media/microsd/Music"
@@ -309,262 +152,156 @@ Scanner.Schedule = "@every 1h"
 LogLevel = "info"
 ```
 
-Save the file.
-
-Configuration explanation:
-
-| Setting | Purpose |
-|---|---|
-| `MusicFolder` | Location of the music collection |
-| `DataFolder` | Location of Navidrome's database and application data |
-| `Address` | Listen on available network interfaces |
-| `Port` | HTTP listening port |
-| `Scanner.Schedule` | Automatically rescan the music collection every hour |
-| `LogLevel` | Logging verbosity |
-
-### Step 8 — Start Navidrome manually
-
-Enter Debian with the microSD bind mount:
+Create the data directory:
 
 ```bash
-proot-distro login debian --bind /storage/0403-0201:/media/microsd
+mkdir -p /var/lib/navidrome
 ```
 
-Inside Debian, run:
+Start Navidrome:
 
 ```bash
 navidrome --configfile /etc/navidrome/navidrome.toml
 ```
 
-On the server phone, open:
+Open the web interface on the server phone:
 
 ```text
 http://127.0.0.1:4533
 ```
 
-Create the initial administrator account and password.
+Create the administrator account through the web interface.
 
-Check that the library is indexed and that a track can be played.
+### 7. Configure remote access with Tailscale
 
-### Step 9 — Test local network streaming
+Install Tailscale on both Android phones and sign in to the same tailnet.
 
-Connect both Android devices to the same Wi-Fi network.
+Enable Tailscale on the server phone and note its Tailscale IP address.
 
-Find the server phone's local IP address in:
-
-**Android Settings → Connections → Wi-Fi → Connected network details**
-
-On the client phone, open:
+The client can connect to:
 
 ```text
-http://SERVER_LOCAL_IP:4533
+http://SERVER-TAILSCALE-IP:4533
 ```
 
-For example:
-
-```text
-http://192.168.1.105:4533
-```
-
-Sign in using the Navidrome credentials.
-
-Verify album browsing and audio playback.
-
-### Step 10 — Configure Tailscale
-
-Install Tailscale on the server phone:
-
-https://play.google.com/store/apps/details?id=com.tailscale.ipn
-
-1. Sign in.
-2. Approve the Android VPN connection.
-3. Wait for the device to show as connected.
-
-Install Tailscale on the client phone as well.
-
-Sign in with the same account so both devices join the same tailnet.
-
-Find the server's Tailscale IPv4 address in the Tailscale device list. It normally belongs to the `100.64.0.0/10` address range.
-
-From the client phone, open:
-
-```text
-http://SERVER_TAILSCALE_IP:4533
-```
-
-To test remote access, turn off Wi-Fi on the client phone and use mobile data.
-
-If the Navidrome interface loads and playback works, remote streaming is operational.
+Replace `SERVER-TAILSCALE-IP` with the server phone's actual Tailscale IP address.
 
 No router port forwarding is required.
 
-### Step 11 — Configure the Android music client
+The Tailscale tunnel encrypts traffic between devices. The HTTP connection is not independently encrypted outside that tunnel.
 
-This project uses Subtracks, an Android music player compatible with Navidrome through the Subsonic API.
+### 8. Install and configure Subtracks
 
-Subtracks is available through F-Droid:
+Install Subtracks on the client Android phone.
 
-https://f-droid.org/packages/com.subtracks/
+Add the Navidrome server using the server's address and port:
 
-Configure the server connection using:
+```text
+http://SERVER-TAILSCALE-IP:4533
+```
 
-- Server address: the server's Tailscale IP address.
-- Port: `4533`.
-- Username and password: the Navidrome account credentials.
+Enter the Navidrome account credentials.
 
-The same Tailscale address can be used both at home and remotely, provided Tailscale is connected on both devices.
+Subtracks communicates with Navidrome through the Subsonic API.
 
-Playback, queue management, and background playback were tested successfully.
+## Automatic startup
 
----
+The server is configured to start automatically after the Android phone boots.
 
-## 3. Automatic startup and process management
+Termux:Boot is used to execute a startup script.
 
-The server is configured to start automatically when the Android device boots.
+Install the Termux:Boot Android application from the same distribution source as Termux.
 
-This is implemented using Termux:Boot and a startup script located at:
+Create the boot script directory:
+
+```bash
+mkdir -p ~/.termux/boot
+```
+
+The startup script is located at:
 
 ```text
 ~/.termux/boot/start-music-server.sh
 ```
 
-Install Termux:Boot from F-Droid:
+The script starts the Debian environment with the microSD bind mount and launches Navidrome.
 
-https://f-droid.org/packages/com.termux.boot/
+The phone must be unlocked after a reboot before Android allows the relevant storage and application processes to operate normally.
 
-Open Termux:Boot at least once after installation.
+Tailscale is configured to reconnect automatically using Android's Always-on VPN setting and unrestricted battery usage.
 
-The startup script performs the following operations:
+## Monitoring
 
-1. Acquires a Termux wake lock to reduce the risk of Android suspending the server process.
-2. Waits for the microSD card to become accessible.
-3. Checks whether an existing server instance is running.
-4. Starts Navidrome inside the Debian PRoot environment with the microSD bind mount.
-5. Waits for the HTTP endpoint to become available.
-6. Writes startup diagnostics to a dedicated log.
+A monitoring script runs periodically through Android's JobScheduler using Termux:API.
 
-The script also checks for an existing server process to avoid starting duplicate instances.
+### Required components
 
-### Shutdown script
+Both components are needed:
 
-A separate shutdown script is available at:
+1. Install the Termux:API Android companion application from the same distribution source as Termux.
+2. Install the command-line package:
 
-```text
-~/bin/stop-music-server.sh
+```bash
+pkg install termux-api
 ```
 
-It identifies the expected PRoot launcher and Navidrome child process, sends Navidrome a termination signal, and waits for the launcher to exit.
+Test the integration:
 
-It also releases the Termux wake lock after a successful shutdown.
+```bash
+termux-battery-status
+```
 
-### Android battery configuration
+### Monitoring script
 
-For reliable background operation:
-
-- Termux battery usage: Unrestricted.
-- Termux:Boot battery usage: Unrestricted.
-- Tailscale battery usage: Unrestricted.
-- Tailscale configured as Android's always-on VPN.
-- Termux:Boot installed and opened at least once.
-
-The startup process and Tailscale reconnection have been tested after reboot without manually launching either application.
-
----
-
-## 4. Monitoring
-
-A monitoring script periodically checks the server's operational state.
-
-Script location:
+The monitoring script is located at:
 
 ```text
 ~/bin/monitor-music-server.sh
 ```
 
-### Health checks
+It checks:
 
-| Check | Description |
-|---|---|
-| Music directory | Verifies that the microSD music directory is accessible |
-| Navidrome process | Checks the PRoot launcher and Navidrome process |
-| HTTP endpoint | Checks whether Navidrome responds on port 4533 |
-| Internal storage | Monitors available Android internal storage |
-| microSD storage | Monitors available microSD storage |
+- Whether the microSD music directory is accessible.
+- Whether the Navidrome process is running.
+- Whether the Navidrome HTTP endpoint responds successfully.
+- Available storage in the relevant locations.
 
-The HTTP check accepts successful responses and redirects, such as HTTP 302, as evidence that the server is responding.
+It records normal status and warnings in:
 
-### Storage warning thresholds
-
-| Storage usage | Status |
-|---|---|
-| Below 90% | Normal |
-| 90%–94% | Warning |
-| 95% or above | Critical |
-
-The monitoring script checks both internal Android storage and the microSD card.
-
-The script only reports problems. It does not automatically restart the server or send remote notifications.
-
-### Periodic execution
-
-Monitoring is scheduled using Android JobScheduler through Termux:API.
-
-The Termux:API package and the separate Termux:API Android companion application are both required.
-
-Configuration:
-
-| Setting | Value |
-|---|---|
-| Job ID | `4533` |
-| Requested interval | 15 minutes |
-| Persistent across reboots | Enabled |
-| Network requirement | No specific network requirement |
-
-The job is registered using:
-
-```bash
-termux-job-scheduler \
-  --script "$HOME/bin/monitor-music-server.sh" \
-  --job-id 4533 \
-  --period-ms 900000 \
-  --persisted true
+```text
+~/monitor.log
 ```
 
-Check pending jobs:
+Storage warnings are configured at:
 
-```bash
-termux-job-scheduler --pending
-```
+| Condition | Threshold |
+|---|---:|
+| Warning | 90% used |
+| Critical | 95% used |
 
-Android may delay scheduled executions because of battery optimization and Doze mode. Therefore, the 15-minute interval is approximate, not a guaranteed execution time.
+The monitor does not automatically restart Navidrome or send remote notifications.
 
-The scheduled job has been tested across a device reboot.
+### JobScheduler configuration
 
----
+The monitoring job uses Job ID `4533`, a requested period of `900000` milliseconds (15 minutes), and persisted scheduling.
 
-## 5. Logging and log rotation
+The Android JobScheduler may defer execution due to Doze mode, battery conditions, or system scheduling decisions. The requested interval is not a guarantee of execution every 15 minutes.
 
-The project uses three main log files:
+The job was registered without an explicit network constraint. Its default network setting is `any`.
 
-| File | Purpose |
+The battery-not-low constraint is enabled by default when it is not explicitly disabled.
+
+## Logging and log rotation
+
+The project uses separate logs for different processes:
+
+| Log file | Purpose |
 |---|---|
-| `~/navidrome.log` | Navidrome application output |
-| `~/navidrome-boot.log` | Startup diagnostics |
-| `~/monitor.log` | Health checks and storage monitoring |
+| `~/navidrome.log` | Navidrome output |
+| `~/navidrome-boot.log` | Startup script output |
+| `~/monitor.log` | Monitoring results |
 
-The Navidrome process writes its output to `navidrome.log`.
-
-The startup script redirects its output to `navidrome-boot.log`.
-
-The monitoring script appends timestamped check results to `monitor.log`.
-
-### Log rotation
-
-Log rotation is handled by logrotate, installed through the Termux package manager:
-
-```bash
-pkg install logrotate
-```
+Log rotation is configured using `logrotate`.
 
 Configuration file:
 
@@ -578,207 +315,129 @@ State file:
 ~/.local/state/logrotate.status
 ```
 
-Rotation policy:
+Configured behavior:
 
-| Log | Rotation threshold | Retained archives |
-|---|---:|---:|
-| `navidrome.log` | 1 MB | 3 |
-| `monitor.log` | 256 KB | 3 |
-| `navidrome-boot.log` | 256 KB | 3 |
+- Navidrome log rotation threshold: 1 MB.
+- Monitoring and boot log rotation threshold: 256 KB.
+- Retain three archived logs.
+- Compress rotated logs.
+- Use `copytruncate` for the Navidrome log.
 
-Older archives are compressed.
+The configuration has been installed and dry-run validated. Actual threshold-triggered archive creation should be tested separately before considering log rotation fully verified.
 
-Navidrome's active log uses the `copytruncate` option. This copies the log and truncates the original file in place, allowing Navidrome to continue writing without restarting.
+## Stopping the server
 
-The monitoring script invokes logrotate after completing its checks.
+A separate stop script is located at:
 
-The configuration has been validated using logrotate's debug mode.
-
----
-
-## 6. Security considerations
-
-### Tailscale
-
-Tailscale provides encrypted connectivity between authorized devices.
-
-Security recommendations:
-
-- Protect the Tailscale account with a strong password and multi-factor authentication where available.
-- Only authorize devices that you control.
-- Review the tailnet device list periodically.
-- Remove devices that are no longer used.
-- Avoid sharing Tailscale authentication credentials.
-
-### Navidrome
-
-Navidrome currently uses HTTP on port `4533`.
-
-Remote traffic through Tailscale travels inside its encrypted network tunnel, but Navidrome itself is not configured for HTTPS.
-
-Additional considerations:
-
-- Do not expose port `4533` directly to the public internet.
-- Avoid router port forwarding.
-- Use a strong, unique Navidrome password.
-- Keep Navidrome and Debian updated.
-- Consider HTTPS through an appropriate Tailscale Serve configuration as a future improvement.
-
-Because Navidrome listens on `0.0.0.0`, it binds to all available network interfaces. Tailscale protects traffic travelling through its tunnel, but ordinary local-network HTTP connections are not independently encrypted.
-
-### Storage and credentials
-
-- Do not commit passwords, authentication keys, or private Tailscale information to GitHub.
-- Do not publish personal music files or copyrighted albums.
-- Do not upload private server logs without reviewing them.
-- Keep the music collection separate from the application database.
-- Avoid committing the actual `navidrome.toml` configuration if it contains private information.
-
----
-
-## 7. Troubleshooting
-
-| Problem | Possible cause | Suggested solution |
-|---|---|---|
-| Debian cannot see music files | Missing bind mount | Re-enter Debian with the `--bind` argument |
-| `Permission denied` when accessing storage | Android storage permission | Run `termux-setup-storage` and grant permission |
-| Navidrome cannot find music | Incorrect `MusicFolder` path | Check `/media/microsd/Music` |
-| Navidrome does not start | Configuration or executable problem | Inspect the application log and configuration |
-| Port 4533 already in use | Duplicate Navidrome instance | Check for existing processes before starting another instance |
-| Local connection fails | Different Wi-Fi networks or wrong IP | Check both devices and the server's local IP |
-| Remote connection fails | Tailscale disconnected | Check that both devices show as connected |
-| Server stops responding | Android background restrictions or terminated process | Check Termux and Android battery settings |
-| Monitoring job does not appear | Termux:API companion app missing or scheduler issue | Check both Termux:API components and run `termux-job-scheduler --pending` |
-| Monitoring runs later than expected | Android JobScheduler delays | Account for Doze mode and Android battery management |
-| Logs grow unexpectedly | Rotation not executing or configuration issue | Inspect logrotate configuration and state file |
-| Artist artwork is missing | External metadata provider did not find the artist | Local playback and library indexing can still work |
-
-### Useful diagnostic commands
-
-Check Debian architecture:
-
-```bash
-uname -m
+```text
+~/bin/stop-music-server.sh
 ```
 
-Check available storage:
+It is used to stop the Navidrome process without manually searching for and terminating it.
+
+## Security considerations
+
+- Remote access is provided through Tailscale.
+- No router port forwarding is configured.
+- Tailscale encrypts traffic between devices in the tailnet.
+- Navidrome listens on `0.0.0.0`, meaning it binds to all available network interfaces.
+- The server uses HTTP rather than independently configured HTTPS.
+- HTTP traffic on the local network is not independently encrypted. Remote traffic carried through Tailscale is encrypted by the VPN tunnel.
+- Server credentials and private configuration files should never be committed to the public repository.
+
+## Troubleshooting
+
+### Navidrome cannot find the music library
+
+Check that the microSD card is mounted and that the bind mount points to the correct Android storage directory.
+
+Inside Debian:
 
 ```bash
-df -h
+ls /media/microsd/Music
 ```
 
-Check FFmpeg:
+### The server is not reachable
+
+Check that Navidrome is running and listening on port `4533`.
+
+Test locally:
 
 ```bash
-ffmpeg -version
+curl -I http://127.0.0.1:4533
 ```
 
-Check that music files are accessible:
+For remote access, verify that Tailscale is connected on both devices.
 
-```bash
-find /media/microsd/Music -type f | head
-```
+### The server does not start after reboot
 
-Check Navidrome version:
+Check that:
 
-```bash
-navidrome --version
-```
+- Termux:Boot is installed.
+- Termux:Boot has been opened at least once.
+- The startup script is in `~/.termux/boot/`.
+- The startup script has executable permissions.
+- The Android phone has been unlocked after reboot.
 
-Check Navidrome's HTTP endpoint from Termux:
+### Monitoring does not run at the expected interval
 
-```bash
-curl -s -o /dev/null -w 'HTTP status: %{http_code}\n' \
-http://127.0.0.1:4533/
-```
+Android JobScheduler controls when the job executes. Doze mode and battery conditions can delay execution.
 
-Check the monitoring log:
+Check the job registration and Termux:API installation.
 
-```bash
-tail -n 20 ~/monitor.log
-```
+## Limitations
 
-Check startup diagnostics:
+- The server depends on the Android phone remaining powered on.
+- Android may restrict background execution.
+- Performance and reliability depend on the phone's hardware and network connection.
+- The microSD card must remain accessible.
+- The monitoring system does not currently restart the server automatically.
+- No remote alerting system is configured.
+- HTTPS is not independently configured on Navidrome.
 
-```bash
-tail -n 20 ~/navidrome-boot.log
-```
+## Possible future improvements
 
-Check application logs:
+- Configure HTTPS using Tailscale Serve.
+- Add remote monitoring notifications.
+- Monitor CPU, memory, and device temperature.
+- Measure streaming performance and network latency.
+- Add controlled recovery if Navidrome unexpectedly stops.
+- Test log rotation under controlled conditions.
+- Add screenshots and sanitized configuration examples.
+- Publish selected scripts in the repository.
 
-```bash
-tail -n 50 ~/navidrome.log
-```
-
-Check scheduled monitoring jobs:
-
-```bash
-termux-job-scheduler --pending
-```
-
----
-
-## 8. Limitations and future improvements
-
-### Current limitations
-
-- The server depends on the old smartphone remaining powered on.
-- Android may restrict background processes.
-- JobScheduler does not guarantee execution at exact intervals.
-- Remote availability depends on the internet connection and Tailscale connectivity.
-- The current configuration uses HTTP rather than application-level HTTPS.
-- The server's storage capacity is limited by the microSD card.
-- Monitoring currently reports problems locally and does not provide remote alerts.
-- The server does not automatically restart itself if Navidrome unexpectedly stops.
-
-### Future improvements
-
-- [ ] Configure HTTPS access through Tailscale Serve.
-- [ ] Add remote monitoring notifications.
-- [ ] Add CPU, RAM, and temperature monitoring.
-- [ ] Document network latency and streaming performance.
-- [ ] Test recovery after unexpected process termination.
-- [ ] Add screenshots and a demonstration of the finished system.
-- [ ] Publish sanitized versions of the startup, shutdown, and monitoring scripts.
-- [ ] Investigate further battery and resource optimizations.
-
----
-
-## 9. Learning outcomes
+## Learning outcomes
 
 This project provides practical experience with:
 
-- Linux userspace environments on Android.
-- ARM64 architecture and package deployment.
-- Linux filesystem access and bind mounts.
-- Service configuration and process management.
-- Shell scripting and process supervision.
-- Android background execution and JobScheduler.
-- Automated startup and shutdown.
+- Linux command-line administration.
+- Debian package management.
+- Android and Linux userspace environments.
+- Process management and startup automation.
+- Network services and HTTP.
+- VPN-based remote access.
+- Shell scripting and system monitoring.
 - Log management and rotation.
-- Self-hosted applications.
-- Local networking and TCP/IP.
-- VPNs and secure remote connectivity.
-- Storage management and application troubleshooting.
+- Configuration management and technical documentation.
 
-It also demonstrates how existing consumer hardware can be repurposed into a functional server without rooting or replacing its operating system.
+## Repository structure
 
----
+```text
+music-server/
+├── README.md
+├── .gitignore
+├── LICENSE
+└── config/
+    └── navidrome.example.toml
+```
 
-## 10. References
+## References
 
-- [Termux](https://termux.dev/)
-- [Termux:Boot](https://github.com/termux/termux-boot)
-- [Termux:API](https://github.com/termux/termux-api)
-- [PRoot-Distro](https://github.com/termux/proot-distro)
-- [Debian](https://www.debian.org/)
 - [Navidrome documentation](https://www.navidrome.org/docs/)
-- [Navidrome releases](https://github.com/navidrome/navidrome/releases)
-- [FFmpeg](https://ffmpeg.org/)
+- [Navidrome GitHub repository](https://github.com/navidrome/navidrome)
+- [Termux documentation](https://termux.dev/en/)
+- [PRoot-Distro documentation](https://github.com/termux/proot-distro)
 - [Tailscale documentation](https://tailscale.com/kb/)
-- [Subtracks](https://github.com/austinried/subtracks)
-- [logrotate](https://github.com/logrotate/logrotate)
-
----
-
-**Project status:** Local and remote music streaming, automatic server startup, Tailscale reconnection, periodic monitoring, and log rotation configuration successfully implemented and tested on a Samsung Galaxy A12.
+- [Subtracks GitHub repository](https://github.com/austinried/subtracks)
+- [Termux:Boot on F-Droid](https://f-droid.org/packages/com.termux.boot/)
+- [Subtracks on F-Droid](https://f-droid.org/packages/com.subtracks/)
