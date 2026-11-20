@@ -1,0 +1,8 @@
+MusicFolder = "/media/microsd/Music"
+DataFolder = "/var/lib/navidrome"
+
+Address = "0.0.0.0"
+Port = "4533"
+
+ScanSchedule = "@every 1h"
+LogLevel = "info"
