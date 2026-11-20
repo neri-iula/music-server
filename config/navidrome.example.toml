@@ -1,5 +1,8 @@
-MusicFolder = "/media/microsd/Music"
-DataFolder = "/var/lib/navidrome"
+# Navidrome example configuration
+# Adapt paths to your own environment.
+
+MusicFolder = "/path/to/your/music"
+DataFolder = "/path/to/navidrome/data"
 
 Address = "0.0.0.0"
 Port = "4533"
