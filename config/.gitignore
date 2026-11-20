@@ -1,0 +1,17 @@
+# Local configuration
+navidrome.toml
+*.local.toml
+.env
+
+# Runtime data
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+
+# Operating system files
+.DS_Store
+Thumbs.db
