@@ -1,11 +1,12 @@
-# Navidrome example configuration
-# Adapt paths to your own environment.
+# Example Navidrome configuration.
+# Adapt MusicFolder and DataFolder to your environment.
+# Do not put credentials or private information in this file.
 
-MusicFolder = "/path/to/your/music"
-DataFolder = "/path/to/navidrome/data"
+MusicFolder = "/media/microsd/Music"
+DataFolder = "/var/lib/navidrome"
 
 Address = "0.0.0.0"
-Port = "4533"
+Port = 4533
 
-ScanSchedule = "@every 1h"
+Scanner.Schedule = "@every 1h"
 LogLevel = "info"
